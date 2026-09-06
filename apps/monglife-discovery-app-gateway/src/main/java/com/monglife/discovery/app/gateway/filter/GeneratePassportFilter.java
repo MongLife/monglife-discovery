@@ -79,7 +79,8 @@ public class GeneratePassportFilter extends AbstractGatewayFilterFactory<FilterC
                                     .buildVersion(passportVo.getData().getAppVersion().getBuildVersion())
                                     .build();
 
-                            loggingUtil.printInfoLog(generatePassportLogDto, LoggerType.LOGSTASH_LOGGER);
+                            httpUtils.withTrace(traceVo.getTraceId(), traceVo.getTraceOffset(),
+                                    () -> loggingUtil.printInfoLog(generatePassportLogDto, LoggerType.LOGSTASH_LOGGER));
                         }
 
                         return chain.filter(exchange);
