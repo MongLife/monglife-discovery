@@ -22,4 +22,9 @@ public class FirebaseLogDto extends LogDto {
         this.message = message;
         this.tokens = tokens;
     }
+
+    @Override
+    public String getDetailMessage() {
+        return String.format("%s | %s", message, tokens);
+    }
 }

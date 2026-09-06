@@ -8,6 +8,7 @@ import com.monglife.core.enums.response.Response;
 import com.monglife.core.exception.ErrorException;
 import com.monglife.core.utils.CommonUtil;
 import com.monglife.discovery.app.gateway.global.response.GatewayErrorCode;
+import com.monglife.discovery.app.gateway.global.utils.HttpUtils;
 import com.monglife.module.common.logging.dto.ExceptionLogDto;
 import com.monglife.module.common.logging.enums.LoggerType;
 import com.monglife.module.common.logging.utils.ArgsUtil;
@@ -19,10 +20,12 @@ import org.springframework.cloud.gateway.support.NotFoundException;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.codec.Hints;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.json.Jackson2JsonEncoder;
+import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.server.ServerWebExchange;
@@ -42,6 +45,8 @@ public class GlobalExceptionHandler implements ErrorWebExceptionHandler {
 
     private final LoggingUtil loggingUtil;
 
+    private final HttpUtils httpUtils;
+
     @Override
     public Mono<Void> handle(ServerWebExchange exchange, Throwable e) {
         String traceId = exchange.getAttributeOrDefault("traceId", CommonUtil.randomId());
@@ -53,13 +58,22 @@ public class GlobalExceptionHandler implements ErrorWebExceptionHandler {
         String className = this.getClass().getName();
         String methodName = "handle";
 
+        /* 라우트에 매칭되지 않은 요청은 AccessLoggingFilter 를 타지 않으므로 여기서 요청 정보를 남긴다 */
+        ServerHttpRequest request = exchange.getRequest();
+        String message = String.format("%s %s - %s (ip: %s, ua: %s)",
+                request.getMethod().name(),
+                request.getPath().value(),
+                e.getMessage(),
+                httpUtils.getClientIp(exchange),
+                httpUtils.getHeader(request, HttpHeaders.USER_AGENT).orElse("-"));
+
         ExceptionLogDto exceptionLogDto = ExceptionLogDto.builder()
                 .traceId(traceId)
                 .traceOffset(traceOffset)
                 .entryMethod("")
                 .className(className)
                 .method(methodName)
-                .message(e.getMessage())
+                .message(message)
                 .stackTrace(argsUtil.generateExceptionTrace(e))
                 .build();
 
@@ -78,9 +92,18 @@ public class GlobalExceptionHandler implements ErrorWebExceptionHandler {
             loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
             loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
             return setErrorResponse(exchange, GatewayErrorCode.DISCOVERY_GATEWAY_CONNECT_FAIL, Collections.emptyMap(), HttpStatus.INTERNAL_SERVER_ERROR);
-        } else if (e instanceof ResponseStatusException) {
-            loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
-            return setErrorResponse(exchange, GatewayErrorCode.DISCOVERY_GATEWAY_NOT_FOUND, Collections.emptyMap(), HttpStatus.NOT_FOUND);
+        } else if (e instanceof ResponseStatusException responseStatusException) {
+            HttpStatusCode httpStatus = responseStatusException.getStatusCode();
+
+            /* 없는 경로 호출 등 클라이언트 잘못이므로 서버 에러 로그로 남기지 않는다 */
+            if (httpStatus.is4xxClientError()) {
+                loggingUtil.printInfoLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
+            } else {
+                loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
+                loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+            }
+
+            return setErrorResponse(exchange, GatewayErrorCode.DISCOVERY_GATEWAY_NOT_FOUND, Collections.emptyMap(), httpStatus);
         } else {
             loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
             loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
@@ -88,11 +111,11 @@ public class GlobalExceptionHandler implements ErrorWebExceptionHandler {
         }
     }
 
-    private Mono<Void> setErrorResponse(ServerWebExchange exchange, ErrorCode errorCode, Map<String, ?> result, HttpStatus httpStatus) {
+    private Mono<Void> setErrorResponse(ServerWebExchange exchange, ErrorCode errorCode, Map<String, ?> result, HttpStatusCode httpStatus) {
 
         exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
-        exchange.getResponse().setStatusCode(HttpStatusCode.valueOf(httpStatus.value()));
-        ResponseDto<Map<String, ?>> responseDto = errorCode.toResponseDto(HttpStatus.INTERNAL_SERVER_ERROR.value(), result);
+        exchange.getResponse().setStatusCode(httpStatus);
+        ResponseDto<Map<String, ?>> responseDto = errorCode.toResponseDto(httpStatus.value(), result);
 
         return exchange.getResponse().writeWith(
                 new Jackson2JsonEncoder()
