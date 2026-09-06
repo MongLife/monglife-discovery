@@ -5,7 +5,7 @@ buildscript {
         acuatorVersion                    = "3.2.1"
         lombokVersion                     = "1.18.30"
         monglifeCoreVersion               = "2.1.0"
-        monglifeModuleCommonVersion       = "2.2.4"
+        monglifeModuleCommonVersion       = "2.3.1"
         logstashVersion                   = "7.4"
     }
 }
