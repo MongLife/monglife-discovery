@@ -7,9 +7,9 @@ import com.monglife.core.enums.response.GlobalResponse;
 import com.monglife.core.enums.response.Response;
 import com.monglife.core.exception.ErrorException;
 import com.monglife.core.utils.CommonUtil;
+import com.monglife.discovery.app.gateway.dto.etc.RequestExceptionLogDto;
 import com.monglife.discovery.app.gateway.global.response.GatewayErrorCode;
 import com.monglife.discovery.app.gateway.global.utils.HttpUtils;
-import com.monglife.module.common.logging.dto.ExceptionLogDto;
 import com.monglife.module.common.logging.enums.LoggerType;
 import com.monglife.module.common.logging.utils.ArgsUtil;
 import com.monglife.module.common.logging.utils.LoggingUtil;
@@ -60,14 +60,9 @@ public class GlobalExceptionHandler implements ErrorWebExceptionHandler {
 
         /* 라우트에 매칭되지 않은 요청은 AccessLoggingFilter 를 타지 않으므로 여기서 요청 정보를 남긴다 */
         ServerHttpRequest request = exchange.getRequest();
-        String message = String.format("%s %s - %s (ip: %s, ua: %s)",
-                request.getMethod().name(),
-                request.getPath().value(),
-                e.getMessage(),
-                httpUtils.getClientIp(exchange),
-                httpUtils.getHeader(request, HttpHeaders.USER_AGENT).orElse("-"));
+        String message = String.format("%s %s - %s", request.getMethod().name(), request.getPath().value(), e.getMessage());
 
-        ExceptionLogDto exceptionLogDto = ExceptionLogDto.builder()
+        RequestExceptionLogDto exceptionLogDto = RequestExceptionLogDto.builder()
                 .traceId(traceId)
                 .traceOffset(traceOffset)
                 .entryMethod("")
@@ -75,38 +70,49 @@ public class GlobalExceptionHandler implements ErrorWebExceptionHandler {
                 .method(methodName)
                 .message(message)
                 .stackTrace(argsUtil.generateExceptionTrace(e))
+                .clientIp(httpUtils.getClientIp(exchange))
+                .userAgent(httpUtils.getHeader(request, HttpHeaders.USER_AGENT).orElse("-"))
                 .build();
 
         /* 시스템 정의 예외 처리 */
         if (e instanceof TokenExpiredException errorException) {
-            loggingUtil.printInfoLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+            httpUtils.withTrace(traceId, traceOffset, () -> loggingUtil.printInfoLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER));
             return setErrorResponse(exchange, errorException.getErrorCode(), errorException.getResult(), HttpStatus.UNAUTHORIZED);
         } else if (e instanceof TokenNotFoundException errorException) {
-            loggingUtil.printInfoLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+            httpUtils.withTrace(traceId, traceOffset, () -> loggingUtil.printInfoLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER));
             return setErrorResponse(exchange, errorException.getErrorCode(), errorException.getResult(), HttpStatus.BAD_REQUEST);
         } else if (e instanceof ErrorException errorException) {
-            loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
-            loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+            httpUtils.withTrace(traceId, traceOffset, () -> {
+                loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
+                loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+            });
             return setErrorResponse(exchange, errorException.getErrorCode(), errorException.getResult(), HttpStatus.INTERNAL_SERVER_ERROR);
         } else if (e instanceof NotFoundException || e instanceof ConnectException || e instanceof WebClientRequestException) {
-            loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
-            loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+            httpUtils.withTrace(traceId, traceOffset, () -> {
+                loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
+                loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+            });
             return setErrorResponse(exchange, GatewayErrorCode.DISCOVERY_GATEWAY_CONNECT_FAIL, Collections.emptyMap(), HttpStatus.INTERNAL_SERVER_ERROR);
         } else if (e instanceof ResponseStatusException responseStatusException) {
             HttpStatusCode httpStatus = responseStatusException.getStatusCode();
 
             /* 없는 경로 호출 등 클라이언트 잘못이므로 서버 에러 로그로 남기지 않는다 */
-            if (httpStatus.is4xxClientError()) {
-                loggingUtil.printInfoLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
-            } else {
-                loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
-                loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
-            }
+            httpUtils.withTrace(traceId, traceOffset, () -> {
+                if (httpStatus.is4xxClientError()) {
+                    loggingUtil.printInfoLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
+                    loggingUtil.printInfoLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+                } else {
+                    loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
+                    loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+                }
+            });
 
             return setErrorResponse(exchange, GatewayErrorCode.DISCOVERY_GATEWAY_NOT_FOUND, Collections.emptyMap(), httpStatus);
         } else {
-            loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
-            loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+            httpUtils.withTrace(traceId, traceOffset, () -> {
+                loggingUtil.printErrorLog(exceptionLogDto, LoggerType.CONSOLE_LOGGER);
+                loggingUtil.printErrorLog(exceptionLogDto, LoggerType.LOGSTASH_LOGGER);
+            });
             return setErrorResponse(exchange, GlobalResponse.INTERNAL_SERVER_ERROR, Collections.emptyMap());
         }
     }

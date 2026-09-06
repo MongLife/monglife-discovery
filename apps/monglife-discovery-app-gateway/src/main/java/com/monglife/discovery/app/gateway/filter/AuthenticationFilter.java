@@ -66,7 +66,8 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<FilterCon
                                     .accessToken(secretAccessToken)
                                     .build();
 
-                            loggingUtil.printInfoLog(authenticationLogDto, LoggerType.LOGSTASH_LOGGER);
+                            httpUtils.withTrace(traceVo.getTraceId(), traceVo.getTraceOffset(),
+                                    () -> loggingUtil.printInfoLog(authenticationLogDto, LoggerType.LOGSTASH_LOGGER));
                         }
 
                         return chain.filter(exchange);
