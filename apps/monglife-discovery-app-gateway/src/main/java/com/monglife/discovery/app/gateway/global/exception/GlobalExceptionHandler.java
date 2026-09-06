@@ -8,6 +8,7 @@ import com.monglife.core.enums.response.Response;
 import com.monglife.core.exception.ErrorException;
 import com.monglife.core.utils.CommonUtil;
 import com.monglife.discovery.app.gateway.global.response.GatewayErrorCode;
+import com.monglife.discovery.app.gateway.global.utils.HttpUtils;
 import com.monglife.module.common.logging.dto.ExceptionLogDto;
 import com.monglife.module.common.logging.enums.LoggerType;
 import com.monglife.module.common.logging.utils.ArgsUtil;
@@ -19,6 +20,7 @@ import org.springframework.cloud.gateway.support.NotFoundException;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.codec.Hints;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -43,6 +45,8 @@ public class GlobalExceptionHandler implements ErrorWebExceptionHandler {
 
     private final LoggingUtil loggingUtil;
 
+    private final HttpUtils httpUtils;
+
     @Override
     public Mono<Void> handle(ServerWebExchange exchange, Throwable e) {
         String traceId = exchange.getAttributeOrDefault("traceId", CommonUtil.randomId());
@@ -56,7 +60,12 @@ public class GlobalExceptionHandler implements ErrorWebExceptionHandler {
 
         /* 라우트에 매칭되지 않은 요청은 AccessLoggingFilter 를 타지 않으므로 여기서 요청 정보를 남긴다 */
         ServerHttpRequest request = exchange.getRequest();
-        String message = String.format("%s %s - %s", request.getMethod().name(), request.getPath().value(), e.getMessage());
+        String message = String.format("%s %s - %s (ip: %s, ua: %s)",
+                request.getMethod().name(),
+                request.getPath().value(),
+                e.getMessage(),
+                httpUtils.getClientIp(exchange),
+                httpUtils.getHeader(request, HttpHeaders.USER_AGENT).orElse("-"));
 
         ExceptionLogDto exceptionLogDto = ExceptionLogDto.builder()
                 .traceId(traceId)

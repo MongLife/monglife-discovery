@@ -8,6 +8,7 @@ import com.monglife.module.common.logging.enums.LoggerType;
 import com.monglife.module.common.logging.utils.LoggingUtil;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
 import org.springframework.cloud.gateway.filter.factory.AbstractGatewayFilterFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 
@@ -44,6 +45,8 @@ public class AccessLoggingFilter extends AbstractGatewayFilterFactory<FilterConf
                         .method(methodName)
                         .httpMethod(request.getMethod().name())
                         .mapping(request.getPath().value())
+                        .clientIp(httpUtils.getClientIp(exchange))
+                        .userAgent(httpUtils.getHeader(request, HttpHeaders.USER_AGENT).orElse("-"))
                         .build();
 
                 loggingUtil.printInfoLog(accessLogDto, LoggerType.LOGSTASH_LOGGER);

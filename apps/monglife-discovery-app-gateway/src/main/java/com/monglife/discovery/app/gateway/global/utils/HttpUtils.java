@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monglife.core.utils.CommonUtil;
 import com.monglife.discovery.app.gateway.vo.TraceVo;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cloud.gateway.support.ipresolver.RemoteAddressResolver;
+import org.springframework.cloud.gateway.support.ipresolver.XForwardedRemoteAddressResolver;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.codec.Hints;
 import org.springframework.http.HttpStatus;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.net.InetSocketAddress;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -25,6 +28,18 @@ import java.util.Optional;
 public class HttpUtils {
     
     private final ObjectMapper objectMapper;
+
+    /**
+     * 클라이언트 실제 IP 를 구하는 리졸버.
+     *
+     * nginx 가 X-Forwarded-For 를 붙여서 넘기므로 remoteAddress 를 그대로 쓰면
+     * 클라이언트가 아니라 nginx 컨테이너 IP 가 나온다.
+     *
+     * maxTrustedIndex(1) 은 XFF 의 **마지막** 값, 즉 nginx 가 직접 본 IP 만 신뢰한다.
+     * 클라이언트가 XFF 를 위조해 보내도 nginx 가 뒤에 실제 IP 를 덧붙이므로 밀리지 않는다.
+     * 프록시 단을 하나 더 두면 그 수만큼 이 값을 올려야 한다.
+     */
+    private final RemoteAddressResolver remoteAddressResolver = XForwardedRemoteAddressResolver.maxTrustedIndex(1);
 
     public TraceVo increaseAndGetTrace(ServerWebExchange exchange) {
 
@@ -48,6 +63,14 @@ public class HttpUtils {
         if (traceOffset != null && !traceOffset.isBlank() && traceOffset.matches("-?\\d+")) {
             exchange.getAttributes().put("traceOffset", String.valueOf(Integer.parseInt(traceOffset) - 1));
         }
+    }
+
+    /**
+     * 클라이언트 실제 IP 조회 (알 수 없으면 "unknown")
+     */
+    public String getClientIp(ServerWebExchange exchange) {
+        InetSocketAddress address = remoteAddressResolver.resolve(exchange);
+        return address != null ? address.getHostString() : "unknown";
     }
 
     public Optional<String> getHeader(ServerHttpRequest request, String key) {
