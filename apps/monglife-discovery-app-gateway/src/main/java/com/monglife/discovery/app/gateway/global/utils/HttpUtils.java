@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monglife.core.utils.CommonUtil;
 import com.monglife.discovery.app.gateway.vo.TraceVo;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.MDC;
 import org.springframework.cloud.gateway.support.ipresolver.RemoteAddressResolver;
 import org.springframework.cloud.gateway.support.ipresolver.XForwardedRemoteAddressResolver;
 import org.springframework.core.ResolvableType;
@@ -62,6 +63,33 @@ public class HttpUtils {
 
         if (traceOffset != null && !traceOffset.isBlank() && traceOffset.matches("-?\\d+")) {
             exchange.getAttributes().put("traceOffset", String.valueOf(Integer.parseInt(traceOffset) - 1));
+        }
+    }
+
+    /**
+     * MDC 에 추적 정보를 채운 상태로 로깅을 실행한다.
+     *
+     * 게이트웨이는 traceId 를 MDC 가 아니라 exchange 속성으로 들고 다녀서 콘솔 패턴의
+     * %X{traceId} 자리가 비어 있었다. 로깅 구간만 MDC 를 채워 그 자리를 메운다.
+     *
+     * ES 필드는 여기서 만들지 않는다. logstash 파이프라인이 message 안의 LogDto JSON 을
+     * 풀어 주므로, LogDto 에 담은 값은 그대로 최상위 필드가 된다.
+     *
+     * WebFlux 라 MDC 를 리액티브 체인 전체로 전파할 수는 없지만, 로깅 호출은 모두
+     * 동기 구간에서 일어나므로 그 구간만 감싸면 된다.
+     *
+     * ⚠ 이벤트 루프 스레드는 요청 사이에 재사용된다. 지우지 않으면 다음 요청 로그에
+     *   남의 traceId 가 섞이므로 finally 에서 반드시 지운다.
+     */
+    public void withTrace(String traceId, int traceOffset, Runnable logging) {
+        MDC.put("traceId", traceId);
+        MDC.put("traceOffset", String.valueOf(traceOffset));
+
+        try {
+            logging.run();
+        } finally {
+            MDC.remove("traceId");
+            MDC.remove("traceOffset");
         }
     }
 

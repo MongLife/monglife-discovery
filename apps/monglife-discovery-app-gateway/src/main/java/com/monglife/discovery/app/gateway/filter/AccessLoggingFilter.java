@@ -49,7 +49,8 @@ public class AccessLoggingFilter extends AbstractGatewayFilterFactory<FilterConf
                         .userAgent(httpUtils.getHeader(request, HttpHeaders.USER_AGENT).orElse("-"))
                         .build();
 
-                loggingUtil.printInfoLog(accessLogDto, LoggerType.LOGSTASH_LOGGER);
+                httpUtils.withTrace(traceVo.getTraceId(), traceVo.getTraceOffset(),
+                        () -> loggingUtil.printInfoLog(accessLogDto, LoggerType.LOGSTASH_LOGGER));
             }
 
             return chain.filter(exchange);
